@@ -14,7 +14,9 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Status
+import com.google.android.gms.games.AchievementsClient
 import com.google.android.gms.games.Games
+import com.google.android.gms.games.LeaderboardsClient
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.PlayGamesAuthProvider
@@ -32,6 +34,11 @@ private const val CHANNEL_NAME = "game_services_firebase_auth"
 private const val RC_SIGN_IN = 9000
 
 object Methods {
+    const val unlock = "unlock"
+    const val increment = "increment"
+    const val submitScore = "submitScore"
+    const val showLeaderboards = "showLeaderboards"
+    const val showAchievements = "showAchievements"
     const val signInWithGameService = "sign_in_with_game_service"
     const val linkGameServicesCredentialsToCurrentUser =
         "link_game_services_credentials_to_current_user"
@@ -41,6 +48,8 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
     MethodChannel.MethodCallHandler, ActivityAware, PluginRegistry.ActivityResultListener {
 
     private var googleSignInClient: GoogleSignInClient? = null
+    private var achievementClient: AchievementsClient? = null
+    private var leaderboardsClient: LeaderboardsClient? = null
     private var activityPluginBinding: ActivityPluginBinding? = null
     private var channel: MethodChannel? = null
     private var pendingOperation: PendingOperation? = null
@@ -81,7 +90,7 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
             pendingOperation = PendingOperation(method!!, gResult!!)
 
             if (task.isSuccessful) {
-                handleSignInResult()
+                handleSignInResult(task.result)
             } else {
                 Log.e("Error", "signInError", task.exception)
                 Log.i("ExplicitSignIn", "Trying explicit sign in")
@@ -102,11 +111,16 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
         activity.startActivityForResult(googleSignInClient?.signInIntent, RC_SIGN_IN)
     }
 
-    private fun handleSignInResult() {
+    private fun handleSignInResult(googleSignInAccount: GoogleSignInAccount) {
         val activity = this.activity!!
 
         val gamesClient =
             Games.getGamesClient(activity, GoogleSignIn.getLastSignedInAccount(activity)!!)
+
+
+        achievementClient = Games.getAchievementsClient(activity, googleSignInAccount)
+        leaderboardsClient = Games.getLeaderboardsClient(activity, googleSignInAccount)
+
         gamesClient.setViewForPopups(activity.findViewById(android.R.id.content))
         gamesClient.setGravityForPopups(Gravity.TOP or Gravity.CENTER_HORIZONTAL)
 
@@ -173,6 +187,63 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
             }
         }
     }
+
+
+    //region Achievements & Leaderboards
+    private fun showAchievements(result: Result) {
+        showLoginErrorIfNotLoggedIn(result)
+        achievementClient!!.achievementsIntent.addOnSuccessListener { intent ->
+            activity?.startActivityForResult(intent, 0)
+            result.success("success")
+        }.addOnFailureListener {
+            result.error("error", "${it.message}", null)
+        }
+    }
+
+    private fun unlock(achievementID: String, result: Result) {
+        showLoginErrorIfNotLoggedIn(result)
+        achievementClient?.unlockImmediate(achievementID)?.addOnSuccessListener {
+            result.success("success")
+        }?.addOnFailureListener {
+            result.error("error", it.localizedMessage, null)
+        }
+    }
+
+    private fun increment(achievementID: String, count: Int, result: Result) {
+        showLoginErrorIfNotLoggedIn(result)
+        achievementClient?.incrementImmediate(achievementID, count)
+            ?.addOnSuccessListener {
+                result.success("success")
+            }?.addOnFailureListener {
+                result.error("error", it.localizedMessage, null)
+            }
+    }
+
+    private fun showLeaderboards(result: Result) {
+        showLoginErrorIfNotLoggedIn(result)
+        leaderboardsClient!!.allLeaderboardsIntent.addOnSuccessListener { intent ->
+            activity?.startActivityForResult(intent, 0)
+            result.success("success")
+        }.addOnFailureListener {
+            result.error("error", "${it.message}", null)
+        }
+    }
+
+    private fun submitScore(leaderboardID: String, score: Int, result: Result) {
+        showLoginErrorIfNotLoggedIn(result)
+        leaderboardsClient?.submitScoreImmediate(leaderboardID, score.toLong())?.addOnSuccessListener {
+            result.success("success")
+        }?.addOnFailureListener {
+            result.error("error", it.localizedMessage, null)
+        }
+    }
+
+    private fun showLoginErrorIfNotLoggedIn(result: Result) {
+        if (achievementClient == null || leaderboardsClient == null) {
+            result.error("error", "Please make sure to call signIn() first", null)
+        }
+    }
+    //endregion
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         setupChannel(binding.binaryMessenger)
@@ -257,7 +328,7 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
             val signInAccount = result?.signInAccount
 
             if (result?.isSuccess == true && signInAccount != null) {
-                handleSignInResult()
+                handleSignInResult(signInAccount)
             } else {
                 finishPendingOperationWithError(ApiException(result?.status ?: Status(0)))
             }
@@ -268,6 +339,25 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
+            Methods.unlock -> {
+                unlock(call.argument<String>("achievementID") ?: "", result)
+            }
+            Methods.increment -> {
+                val achievementID = call.argument<String>("achievementID") ?: ""
+                val steps = call.argument<Int>("steps") ?: 1
+                increment(achievementID, steps, result)
+            }
+            Methods.submitScore -> {
+                val leaderboardID = call.argument<String>("leaderboardID") ?: ""
+                val score = call.argument<Int>("value") ?: 0
+                submitScore(leaderboardID, score, result)
+            }
+            Methods.showLeaderboards -> {
+                showLeaderboards(result)
+            }
+            Methods.showAchievements -> {
+                showAchievements(result)
+            }
             Methods.signInWithGameService -> {
                 method = Methods.signInWithGameService
 
