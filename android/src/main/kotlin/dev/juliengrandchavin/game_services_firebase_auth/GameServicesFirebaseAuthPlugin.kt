@@ -75,6 +75,13 @@ class GameServicesFirebaseAuthPlugin(private var activity: Activity? = null) : F
             return context.getString(stringRes)
         }
 
+        @JvmStatic
+        fun registerWith(registrar: PluginRegistry.Registrar) {
+            val channel = MethodChannel(registrar.messenger(), CHANNEL_NAME)
+            val plugin = GameServicesFirebaseAuthPlugin(registrar.activity())
+            channel.setMethodCallHandler(plugin)
+            registrar.addActivityResultListener(plugin)
+        }
     }
 
     private fun silentSignIn() {
