@@ -290,3 +290,12 @@ public class SwiftGameServicesFirebaseAuthPlugin: NSObject, FlutterPlugin {
         }
     }
 }
+
+// MARK: - GKGameCenterControllerDelegate
+
+extension SwiftGamesServicesPlugin: GKGameCenterControllerDelegate {
+
+  public func gameCenterViewControllerDidFinish(_ gameCenterViewController: GKGameCenterViewController) {
+    viewController.dismiss(animated: true, completion: nil)
+  }
+}
