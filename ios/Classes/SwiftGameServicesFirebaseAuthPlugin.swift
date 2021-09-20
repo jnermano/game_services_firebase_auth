@@ -152,35 +152,129 @@ public class SwiftGameServicesFirebaseAuthPlugin: NSObject, FlutterPlugin {
     }
     
     
+  // MARK: - Leaderboard
+
+  func showLeaderboardWith(identifier: String) {
+    let vc = GKGameCenterViewController()
+    vc.gameCenterDelegate = self
+    vc.viewState = .achievements
+    vc.leaderboardIdentifier = identifier
+    viewController.present(vc, animated: true, completion: nil)
+  }
+
+  func report(score: Int64, leaderboardID: String, result: @escaping FlutterResult) {
+    let reportedScore = GKScore(leaderboardIdentifier: leaderboardID)
+    reportedScore.value = score
+    GKScore.report([reportedScore]) { (error) in
+      guard error == nil else {
+        result(error?.localizedDescription ?? "")
+        return
+      }
+      result("success")
+    }
+  }
+
+  // MARK: - Achievements
+
+  func showAchievements() {
+    let vc = GKGameCenterViewController()
+    vc.gameCenterDelegate = self
+    vc.viewState = .achievements
+    viewController.present(vc, animated: true, completion: nil)
+  }
+
+  func report(achievementID: String, percentComplete: Double, result: @escaping FlutterResult) {
+    let achievement = GKAchievement(identifier: achievementID)
+    achievement.percentComplete = percentComplete
+    achievement.showsCompletionBanner = true
+    GKAchievement.report([achievement]) { (error) in
+      guard error == nil else {
+        result(error?.localizedDescription ?? "")
+        return
+      }
+      result("success")
+    }
+  }
+  
+  // MARK: - AccessPoint
+
+  func showAccessPoint(location: String) {
+    if #available(iOS 14.0, *) {
+      var gkLocation: GKAccessPoint.Location = .topLeading
+      switch location {
+      case "topLeading":
+        gkLocation = .topLeading
+      case "topTrailing":
+        gkLocation = .topTrailing
+      case "bottomLeading":
+        gkLocation = .bottomLeading
+      case "bottomTrailing":
+        gkLocation = .bottomTrailing
+      default:
+        break
+      }
+      GKAccessPoint.shared.location = gkLocation
+      GKAccessPoint.shared.isActive = true
+    }
+  }
+  
+  func hideAccessPoint() {
+    if #available(iOS 14.0, *) {
+      GKAccessPoint.shared.isActive = false
+    }
+  }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        if(call.method == "sign_in_with_game_service") {
-            
-            signInWithGameCenter () { cred, error in
-                if let error = error {
-                    result(error)
+        let arguments = call.arguments as? [String: Any]
+        switch call.method {
+            case "unlock":
+                let achievementID = (arguments?["achievementID"] as? String) ?? ""
+                let percentComplete = (arguments?["percentComplete"] as? Double) ?? 0.0
+                report(achievementID: achievementID, percentComplete: percentComplete, result: result)
+            case "submitScore":
+                let leaderboardID = (arguments?["leaderboardID"] as? String) ?? ""
+                let score = (arguments?["value"] as? Int) ?? 0
+                report(score: Int64(score), leaderboardID: leaderboardID, result: result)
+            case "showAchievements":
+                showAchievements()
+                result("success")
+            case "showLeaderboards":
+                let leaderboardID = (arguments?["iOSLeaderboardID"] as? String) ?? ""
+                showLeaderboardWith(identifier: leaderboardID)
+                result("success")
+            case "hideAccessPoint":
+                hideAccessPoint()
+            case "showAccessPoint":
+                let location = (arguments?["location"] as? String) ?? ""
+                showAccessPoint(location: location)
+            case "sign_in_with_game_service":
+                signInWithGameCenter () { cred, error in
+                    if let error = error {
+                        result(error)
+                    }
+                    result(true)
                 }
-                result(true)
-            }
+            break
+            case "link_game_services_credentials_to_current_user":
+                var forceSignInIfCredentialAlreadyUsed = false
             
-        } else if(call.method == "link_game_services_credentials_to_current_user"){
-            
-            var forceSignInIfCredentialAlreadyUsed = false
-            
-            let args = call.arguments as? Dictionary<String, Any>
-            
-            if(args != nil) {
-                forceSignInIfCredentialAlreadyUsed = (args!["force_sign_in_credential_already_used"] as? Bool) ?? false
-            }
-            
-            linkGameCenterCredentialsToCurrentUser (forceSignInIfCredentialAlreadyUsed: forceSignInIfCredentialAlreadyUsed) { cred, error in
-                if let error = error {
-                    result(error)
+                let args = call.arguments as? Dictionary<String, Any>
+                
+                if(args != nil) {
+                    forceSignInIfCredentialAlreadyUsed = (args!["force_sign_in_credential_already_used"] as? Bool) ?? false
                 }
-                result(true)
-            }
-        }else {
-            self.log(message: "Unknown method called")
+                
+                linkGameCenterCredentialsToCurrentUser (forceSignInIfCredentialAlreadyUsed: forceSignInIfCredentialAlreadyUsed) { cred, error in
+                    if let error = error {
+                        result(error)
+                    }
+                    result(true)
+                }
+            break
+            default:
+                self.log(message: "Unknown method called")
+                result("unimplemented")
+            break
         }
     }
     
